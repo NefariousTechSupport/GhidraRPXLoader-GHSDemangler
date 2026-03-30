@@ -4,6 +4,7 @@ import ghidra.app.plugin.core.analysis.AbstractDemanglerAnalyzer;
 import ghidra.app.util.demangler.DemangledException;
 import ghidra.app.util.demangler.DemangledObject;
 import ghidra.app.util.demangler.DemanglerOptions;
+import ghidra.app.util.demangler.MangledContext;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.framework.options.Options;
 import ghidra.program.model.listing.Program;
@@ -36,10 +37,9 @@ public class GHSDemanglerAnalyzer extends AbstractDemanglerAnalyzer {
 	private boolean applyCallingConvention = false;
 	//private boolean writeLogs = false;
 
-	private final GHSDemangler demangler = new GHSDemangler();
-
 	public GHSDemanglerAnalyzer() {
 		super(NAME, DESCRIPTION);
+		demangler = new GHSDemangler();
 		setDefaultEnablement(true);
 	}
 
@@ -67,13 +67,13 @@ public class GHSDemanglerAnalyzer extends AbstractDemanglerAnalyzer {
 
 
 	@Override
-	protected DemangledObject doDemangle(String mangled, DemanglerOptions options, MessageLog log)
+	protected DemangledObject doDemangle(MangledContext context, MessageLog log)
 			throws DemangledException {
-		options.setApplySignature(applyFunctionSignature);
-		options.setDemangleOnlyKnownPatterns(applyOnlyKnown);
-		options.setApplyCallingConvention(applyCallingConvention);
+		context.getOptions().setApplySignature(applyFunctionSignature);
+		context.getOptions().setDemangleOnlyKnownPatterns(applyOnlyKnown);
+		context.getOptions().setApplyCallingConvention(applyCallingConvention);
 		//demangler.writeLogs = true;
-		return demangler.demangle(mangled, options);
+		return demangler.demangle(context);
 	}
 
 }
