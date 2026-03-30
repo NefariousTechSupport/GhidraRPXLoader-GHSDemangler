@@ -5,6 +5,7 @@ package cafeloader;
 
 import ghidra.app.util.demangler.*;
 import ghidra.app.util.demangler.gnu.DemanglerParseException;
+import ghidra.app.util.demangler.gnu.GhsDemanglerParser;
 import ghidra.program.model.listing.Program;
 import ghidra.util.Msg;
 
@@ -16,7 +17,7 @@ import static java.util.Map.entry;
 
 public final class GHSDemangler implements Demangler {
 
-	private static List<DemangledDataType> arguments;
+	private static List<DemangledParameter> arguments;
 	private static DemangledDataType returnType;
 	private static boolean isThunk;
 	private static boolean varargs;
@@ -190,7 +191,7 @@ public final class GHSDemangler implements Demangler {
 		mangled = result;
 	}
 
-	private static String ReadNameSpace(String name) {
+	private static ArrayList<String> ReadNameSpace(String name) {
 		if (name == null || name.isEmpty()) throw new IllegalArgumentException("Unexpected end of string. Expected \"Q\".");
 		if (!name.startsWith("Q")) throw new IllegalArgumentException("Unexpected character \"" + name.charAt(0) + "\". Expected \"Q\".");
 
@@ -204,7 +205,7 @@ public final class GHSDemangler implements Demangler {
 
 		mangled = name.substring(1);
 
-		StringBuilder result = new StringBuilder();
+		ArrayList<String> result = new ArrayList<String>();
 		for (int j = 0; j < count; j++) {
 			String current;
 			if (mangled.startsWith("Z")) {
@@ -218,14 +219,13 @@ public final class GHSDemangler implements Demangler {
 				current = ReadString(mangled, null);
 			}
 
-			result.append(!result.isEmpty() ? "::" : "");
-			result.append(current);
+			result.add(current);
 		}
 
-		return result.toString();
+		return result;
 	}
 
-	private static String ReadNameSpaceSW(String name, StringWrapper remainder) { //TODO: duplicate code, remove alongside SW
+	private static ArrayList<String> ReadNameSpaceSW(String name, StringWrapper remainder) { //TODO: duplicate code, remove alongside SW
 		if (name == null || name.isEmpty()) throw new IllegalArgumentException("Unexpected end of string. Expected \"Q\".");
 		if (!name.startsWith("Q")) throw new IllegalArgumentException("Unexpected character \"" + name.charAt(0) + "\". Expected \"Q\".");
 
@@ -239,7 +239,7 @@ public final class GHSDemangler implements Demangler {
 
 		remainder.value = name.substring(1);
 
-		StringBuilder result = new StringBuilder();
+		ArrayList<String> result = new ArrayList<String>();
 		for (int j = 0; j < count; j++) {
 			String current;
 			if (remainder.value.startsWith("Z")) {
@@ -253,11 +253,10 @@ public final class GHSDemangler implements Demangler {
 				current = ReadString(remainder.value, remainder);
 			}
 
-			result.append(!result.isEmpty() ? "::" : "");
-			result.append(current);
+			result.add(current);
 		}
 
-		return result.toString();
+		return result;
 	}
 
 	private static String ReadArguments(String name, StringWrapper remainder) {
@@ -273,7 +272,7 @@ public final class GHSDemangler implements Demangler {
 			String typeClean = type.replace("#", "");
 			result.append(typeClean);
 
-			if(typeClean.equals("char *") || typeClean.equals("char  *")) {
+			/*if(typeClean.equals("char *") || typeClean.equals("char  *")) {
 				DemangledDataType hackType = new DemangledDataType(null, null, DemangledDataType.CHAR); //TODO: hack!
 				hackType.incrementPointerLevels(); //TODO: i don't know if this is right
 				arguments.add(hackType);
@@ -288,9 +287,14 @@ public final class GHSDemangler implements Demangler {
 				//arguments.get(arguments.size() - 1).setVarArgs();
 				varargs = true;
 			} else
-				arguments.add( new DemangledDataType( null, null, typeClean ) );
+				arguments.add( new DemangledDataType( null, null, typeClean ) );*/
+
 			args.add(type);
 		}
+
+		GhsDemanglerParser parser = new GhsDemanglerParser();
+		arguments.addAll(parser.parseParameters(result.toString()));
+
 		return result.toString(); //TODO: this *Might* be redundant
 	}
 
@@ -299,6 +303,19 @@ public final class GHSDemangler implements Demangler {
 			target.value = newValue;
 		else
 			mangled = newValue;
+	}
+
+	private static String buildNamespaceString(ArrayList<String> names)
+	{
+		StringBuilder result = new StringBuilder();
+
+		for (int i = 0; i < names.size(); i++)
+		{
+			result.append(i > 0 ? "::" : "");
+			result.append(names.get(i));
+		}
+
+		return result.toString();
 	}
 
 	private static String ReadType(List<String> args, String name, StringWrapper remainder) {
@@ -312,9 +329,9 @@ public final class GHSDemangler implements Demangler {
 		/* e.g. "Q2_3std4move__tm__2_w" => "std::move<wchar_t>#" */
 		else if (name.startsWith("Q")) {
 			if(remainder != null)
-				return ReadNameSpaceSW(name, remainder) + "#";
+				return buildNamespaceString(ReadNameSpaceSW(name, remainder)) + "#";
 			else
-				return ReadNameSpace(name) + "#";
+				return buildNamespaceString(ReadNameSpace(name)) + "#";
 		}
 			/* e.g. "8MyStruct" => "MyStruct#" */
 		else if (Character.isDigit(name.charAt(0)))
@@ -641,8 +658,14 @@ public final class GHSDemangler implements Demangler {
 		return DemangleTemplate(nameBuilder.toString());
 	}
 
+	public GHSDemangler() {
+		// needed to instantiate dynamically
+	}
+
 	@Override  //TODO: the demangler outputs types like "char const *" or "unsigned int" instead of just "char *" or "uint" so ghidra doesn't work properly with that
-	public DemangledObject demangle(String symbol, DemanglerOptions options) { //TODO: get rid of StringWrapper
+	public DemangledObject demangle(MangledContext context) { //TODO: get rid of StringWrapper
+		String symbol = context.getMangled();
+		DemanglerOptions options = context.getOptions();
 		char lastChar = symbol.charAt(symbol.length() - 1);
 		while (lastChar == ' ') {
 			lastChar = symbol.charAt(symbol.length() - 1);
@@ -688,23 +711,22 @@ public final class GHSDemangler implements Demangler {
 			isStatic = true;
 			mangled = mangled.substring(3);
 		}
-		String declNameSpace, declClass;
+		ArrayList<String> declNameSpace = new ArrayList<String>();
+		String declClass = "";
 
 		if (mangled.startsWith("Q")) {
 			declNameSpace = ReadNameSpace(mangled);
 
-			int last = declNameSpace.lastIndexOf("::");
-			if (last != -1)
-				declClass = declNameSpace.substring(last + 2);
-			else
-				declClass = declNameSpace;
+			if (declNameSpace.size() > 0)
+			{
+				declClass = declNameSpace.get(declNameSpace.size() - 1);
+			}
 
 		} else if (!mangled.isEmpty() && Character.isDigit(mangled.charAt(0))) {
 			declClass = ReadString(null, null);
-			declNameSpace = declClass;
+			declNameSpace.add(declClass);
 		} else {
-			declNameSpace = "";
-			declClass = "";
+			// Nothing
 		}
 
 		baseName = baseName.replace("#", declClass);//TODO: what?
@@ -750,7 +772,10 @@ public final class GHSDemangler implements Demangler {
 		DemangledFunction demangled = new DemangledFunction(symbol, symbol, baseName); //TODO: formerly result was the second arg but that's gone now since i broke it
 
 		if(!declNameSpace.isEmpty())
-			demangled.setNamespace( new DemangledType(null, declNameSpace, declNameSpace) );
+		{
+			GhsDemanglerParser parser = new GhsDemanglerParser();
+			demangled.setNamespace(parser.convertToNamespaces(declNameSpace));
+		}
 
 		demangled.setStatic(isStatic);
 
@@ -759,8 +784,8 @@ public final class GHSDemangler implements Demangler {
 		//TODO: surely there is some DemangledFunction.THISCALL constant from ghidra that we can use here
 
 		if(options.applySignature()) {
-			for (DemangledDataType type : arguments) //lol, lmao
-				demangled.addParameter(new DemangledParameter(type));
+			for (DemangledParameter param : arguments) //lol, lmao
+				demangled.addParameter(param);
 
 			if(varargs) {
 				DemangledDataType variadic = new DemangledDataType(null, null, DemangledDataType.VARARGS);
@@ -784,11 +809,6 @@ public final class GHSDemangler implements Demangler {
 
 		demangled.setThunk(isThunk);
 		return demangled;
-	}
-	@Override
-	@SuppressWarnings("removal") //TODO: is this ok?
-	public DemangledObject demangle(String mangled, boolean canDemangle) throws DemangledException {
-		return demangle(mangled);
 	}
 
 	@Override
